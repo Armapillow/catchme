@@ -19,6 +19,10 @@
 #define W   80
 #define MAXSTARS    100
 
+using Frames = int;
+using Seconds = float;
+
+
 const char* LOGO[] = {
     R"(__   ____    _  _____ ____ _   _ __  __ _____ __)",
     R"(\ \ / ___|  / \|_   _/ ___| | | |  \/  | ____/ /)",
@@ -32,8 +36,8 @@ std::vector<int> rowCount(H, 0);
 
 struct Star {
     int x, y;
-    int speed;
-    int tick;
+    Frames speed;
+    Frames tick;
 };
 
 struct Cell {
@@ -44,8 +48,8 @@ struct Cell {
 struct Word {
     std::string text;
     int x, y;
-    int speed;
-    int tick;
+    Frames speed;
+    Frames tick;
     bool active;
 
     Word() = default;
@@ -141,7 +145,7 @@ struct Term {
         }
     }
 
-    void drawText(int row, int col, const char *text, Color color)
+    void drawText(int row, int col, const char *text, Color color) const
     {
         assert(col < W && "Numbers of columns are exceeded");
         while (*text && col < W)
@@ -242,7 +246,7 @@ struct Term {
 
         // draw stars
         for (int i= 0; i < MAXSTARS; i++) {
-            Star s = stars[i];
+            const Star &s = stars[i];
             int x = s.x;
             int y = s.y;
             buffer[y][x].ch = '.';
@@ -392,7 +396,7 @@ struct Term {
         return -1;
     }
 
-    bool ShouldClose()
+    bool ShouldClose() const
     {
         return !shouldClose;
     }
@@ -400,7 +404,7 @@ struct Term {
     void checkWords()
     {
         for (Word &w : words) {
-            if (w.text == inputWord) {
+            if (w.active && w.text == inputWord) {
                 w.active = false;
                 hitWords++;
                 rowCount[w.y]--;
@@ -417,8 +421,8 @@ struct Term {
     int spawnedCount = 0;
     int allowedCount = 10; // size of the first wave
     int waveIncrement = 5;
-    float waveIntervals = 7.0f; // second between waves
-    float spawnInterval = 0.5f; // second per word (steady rate)
+    Seconds waveIntervals = 7.0f; // second between waves
+    Seconds spawnInterval = 0.5f; // second per word (steady rate)
 
 
     // Timer
@@ -430,6 +434,8 @@ struct Term {
     std::string inputWord{};
     std::vector<Word> words{};
     Star stars[MAXSTARS];
+    //using Screen = std::array<std::array<Cell, W>, H>;
+    //Screen buffer;
     Cell buffer[H][W];
 
     bool finalScreen = false;
