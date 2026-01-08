@@ -1,0 +1,7 @@
+build/
+catchme
+main
+
+*.o
+*~
+*.swp
