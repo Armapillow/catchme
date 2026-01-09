@@ -34,6 +34,12 @@ const char* LOGO[] = {
 const int MAX_PER_ROW = 1;  // or 2
 std::vector<int> rowCount(H, 0);
 
+enum class State {
+    WELCOME,
+    PLAY,
+    FINAL,
+};
+
 struct Star {
     int x, y;
     Frames speed;
@@ -63,8 +69,9 @@ std::ostream &operator<< (std::ostream &os, const Word &w)
     return os;
 }
 
-struct Term {
-    Term(bool raw = true)
+// Terminal renderer
+struct TermRenderer {
+    TermRenderer(bool raw = true)
     {
         if (raw)
             setRaw();
@@ -73,8 +80,190 @@ struct Term {
         // [?1049h - switch to alternate screen
         // [?25l   - turn off cursor
         std::cout << "\033[?1049h\033[H\033[?25l";
+    }
 
+    ~TermRenderer()
+    {
+        // restore the state
+        // ?1049l - return to normal screen
+        // ?25h   - show cursor
+        // 0m     - reset attributes
+        std::cout << "\033[?1049l\033[0m\033[?25h";
 
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term);
+    }
+
+    void setRaw()
+    {
+        struct termios raw;
+        tcgetattr(STDIN_FILENO, &orig_term);
+
+        raw = orig_term;
+        raw.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+
+        fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
+    }
+
+    void clearBuffer(void)
+    {
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                buffer[y][x] = {' ', Color::Reset };
+            }
+        }
+    }
+
+    void drawText(int row, int col, const char *text, Color color)
+    {
+        assert(col < W && "Numbers of columns are exceeded");
+        while (*text && col < W)
+            buffer[row][col++] = {*text++, color};
+    }
+
+    void drawBars(void)
+    {
+        for (int x = 0; x < W; x++) {
+            buffer[0][x] = {' ', Color::BgBlue };
+            buffer[H-1][x] = {' ', Color::BgBlue };
+        }
+    }
+
+    void drawStars(const Star *stars)
+    {
+        for (int i = 0; i < MAXSTARS; i++) {
+            const Star &s = stars[i];
+            int x = s.x;
+            int y = s.y;
+            buffer[y][x].ch = '.';
+            if (s.speed == 1)
+                buffer[y][x].color = Color::White; /* | Color::Bold; */
+            else if (s.speed == 2)
+                buffer[y][x].color = Color::White;
+            else if (s.speed == 3)
+                buffer[y][x].color = Color::White | Color::Dim;
+            else
+                assert(false && "UNREACHABLE");
+        }
+    }
+
+    void drawWords(const std::vector<Word> &words)
+    {
+        for (auto &w : words) {
+            if (w.active) {
+                int col = w.x;
+                int row = w.y;
+                int n = w.text.size();
+                for (size_t i = 0; i < n; i++) {
+                    double pos = static_cast<double>(col+i)/W;
+                    if (col+i >= 0 && col+i < W && row >= 0 && row < H) {
+                        buffer[row][col+i].ch = w.text[i];
+                        if (pos >= 0.8) 
+                            buffer[row][col+i].color = Color::Red | Color::Bold;
+                        else if (pos >= 0.6)
+                            buffer[row][col+i].color = Color::Yellow | Color::Bold;
+                        else {
+                            buffer[row][col+i].color = Color::Green | Color::Bold;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    void drawWelcomeScreen(void)
+    {
+        int pos = 5,
+            n   = sizeof(LOGO)/sizeof(LOGO[0]);
+        for (int i = 0; i < n; i++)
+            drawText(pos+i, 16, LOGO[i], Color::White | Color::Bold);
+        drawText(pos+n, 29, "<Press SPACE to start>", Color::Bold/*Color::Underline*/);
+        drawText(pos+n+1, 36, "Option 1", Color::White);
+        drawText(pos+n+2, 36, "Option 2", Color::White);
+        drawText(pos+n+3, 36, "Option 3", Color::White);
+    }
+
+    void drawTypeBox(const std::string &inputWord)
+    {
+        // Draw typing field and input
+        std::string typeBox = "[Type: " + inputWord;
+        int pos = 0;
+        for (int i = 0; i < typeBox.size(); i++) {
+            if (pos > W)
+                break;
+            buffer[H-1][pos++] = { typeBox[i], Color::White | Color::BgBlue };
+        }
+        buffer[H-1][25] = { ']', Color::White | Color::BgBlue };
+    }
+
+    void drawFinalScreen(const int &hitWords)
+    {
+        std::string resultText = "Your result is " + std::to_string(hitWords) + "w/m";
+        drawText(H/2-2, W/2 - resultText.size()/2, resultText.c_str(), Color::White | Color::Bold);
+    }
+
+    void drawTimer(const int &sec)
+    {
+
+        int minutes = sec/60;
+        int seconds = sec%60;
+
+        std::string timerText = std::to_string(minutes) + ":" + (seconds < 10 ? "0" : "") + std::to_string(seconds);
+        int x = W - 8; // adjust for MM:SS width
+        int y = H - 1; // bottom row
+
+        Color timerColor = Color::White | Color::BgBlue;
+        if (sec <= 10) {
+            // blink effect
+            if ((sec * 2) % 2 == 0) // toggle every 0.5s
+                timerColor = Color::Red | Color::BgBlue | Color::Bold; // | Color::Blink;
+        }
+
+        for (int i = 0; i < timerText.size(); i++) {
+            if (x+i >= 0 && x+i < W)
+                buffer[y][x+i] = { timerText[i], timerColor };
+        }
+    }
+
+    void draw(void)
+    {
+        Color last = Color::Reset;
+        std::cout << "\033[H";
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                const Color& cur = buffer[y][x].color;
+                if (cur.mask != last.mask) {
+                    std::cout << "\033[0m";
+                    std::cout << cur;
+                    last = cur;
+                }
+                std::cout << buffer[y][x].ch;
+            }
+            std::cout.write("\n", 1);
+        }
+        std::cout.flush();
+    }
+
+    Cell buffer[H][W];
+    struct termios orig_term{};
+};
+
+struct Input {
+
+    int readKey(void)
+    {
+        int n = ::read(STDIN_FILENO, &ch, 1);
+        if (n == 1) return ch;
+        return -1;
+    }
+
+    char ch;
+};
+
+struct Game {
+
+    Game()
+    {
         ::srand(::time(NULL));
 
         // init stars
@@ -85,6 +274,7 @@ struct Term {
             stars[i].tick = 0;
         }
 
+        // TODO: function loadWords(filepath)
         const std::string filePath = "english.txt";
         std::ifstream in(filePath);
         std::string line;
@@ -125,33 +315,6 @@ struct Term {
 
     }
 
-    ~Term()
-    {
-        // restore the state
-        // ?1049l - return to normal screen
-        // ?25h   - show cursor
-        // 0m     - reset attributes
-        std::cout << "\033[?1049l\033[0m\033[?25h";
-
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term);
-    }
-
-    void clearBuffer(void)
-    {
-        for (int y = 0; y < H; y++) {
-            for (int x = 0; x < W; x++) {
-                buffer[y][x] = {' ', Color::Reset };
-            }
-        }
-    }
-
-    void drawText(int row, int col, const char *text, Color color) const
-    {
-        assert(col < W && "Numbers of columns are exceeded");
-        while (*text && col < W)
-            buffer[row][col++] = {*text++, color};
-    }
-
     inline
     int remainingSeconds() const
     {
@@ -162,6 +325,64 @@ struct Term {
 
         int remaining = TOTAL_TIME - elapsed;
         return remaining > 0 ? remaining : 0;
+    }
+
+    void checkWords()
+    {
+        for (Word &w : words) {
+            if (w.active && w.text == inputWord) {
+                w.active = false;
+                hitWords++;
+                rowCount[w.y]--;
+            }
+        }
+        inputWord.clear();
+    }
+
+    bool close() const
+    {
+        return !shouldClose;
+    }
+
+    void clearBuffer()
+    {
+        renderer.clearBuffer();
+    }
+
+    void processInput(void)
+    {
+        char ch = input.readKey();
+        if (ch == -1) return;
+
+        if (gameState == State::WELCOME) {
+            if (ch == 'q')
+                shouldClose = true;
+            else if (ch == ' ') {
+                gameState = State::PLAY;
+                //inputWord.clear();
+                startTime = clock::now();
+            }
+            return;
+        } else if (gameState == State::FINAL) {
+            /*
+            if (ch == 'r') {
+                gameState = State::PLAY;
+                inputWord.clear();
+                startTime = clock::now();
+                hitWords = 0;
+                //words.clear();
+                // load words
+            }
+            */
+        }
+        if (ch == '\033')
+            shouldClose = true;
+        else if (ch == 127 && !inputWord.empty())
+                inputWord.pop_back();
+        else if (ch == ' ')
+            checkWords();
+        else if (::isprint(ch))
+            inputWord += ch;
     }
 
     void update(void)
@@ -180,7 +401,7 @@ struct Term {
             }
         }
 
-        if (!welcomeScreen) {
+        if (gameState == State::PLAY) {
             auto now = clock::now();
             float waveElapsed = std::chrono::duration<float>(now - lastWaveTime).count();
 
@@ -198,8 +419,7 @@ struct Term {
                 std::chrono::duration<float>(now - lastSpawnTime).count();
 
             // steady spawn logic
-            if (spawnElapsed >= spawnInterval &&
-                    spawnedCount < allowedCount &&
+            if (spawnElapsed >= spawnInterval && spawnedCount < allowedCount &&
                     spawnedCount < words.size())
             {
                 lastSpawnTime = now;
@@ -231,188 +451,45 @@ struct Term {
                     }
                 }
             }
-
         }
-
     }
 
     void drawBuffer(void)
     {
-        // draw bars
-        for (int x = 0; x < W; x++) {
-            buffer[0][x] = {' ', Color::BgBlue };
-            buffer[H-1][x] = {' ', Color::BgBlue };
-        }
+        renderer.drawBars();
+        renderer.drawStars(stars);
 
-        // draw stars
-        for (int i= 0; i < MAXSTARS; i++) {
-            const Star &s = stars[i];
-            int x = s.x;
-            int y = s.y;
-            buffer[y][x].ch = '.';
-            if (s.speed == 1)
-                buffer[y][x].color = Color::White; /* | Color::Bold; */
-            else if (s.speed == 2)
-                buffer[y][x].color = Color::White;
-            else if (s.speed == 3)
-                buffer[y][x].color = Color::White | Color::Dim;
-            else
-                assert(false && "UNREACHABLE");
-        }
+        if (gameState == State::WELCOME)
+            renderer.drawWelcomeScreen();
+        else if (gameState == State::PLAY) {
 
-
-        // Welcome screen
-        if (welcomeScreen) {
-            int pos = 5,
-                n   = sizeof(LOGO)/sizeof(LOGO[0]);
-            for (int i = 0; i < n; i++)
-                drawText(pos+i, 16, LOGO[i], Color::White | Color::Bold);
-            drawText(pos+n, 29, "<Press SPACE to start>", Color::Bold/*Color::Underline*/);
-            drawText(pos+n+1, 36, "Option 1", Color::White);
-            drawText(pos+n+2, 36, "Option 2", Color::White);
-            drawText(pos+n+3, 36, "Option 3", Color::White);
-        } else if (finalScreen) {
-            std::string resultText = "Your result is " + std::to_string(hitWords) + "w/m";
-            drawText(H/2-2, W/2 - resultText.size()/2, resultText.c_str(), Color::White | Color::Bold);
-        } else  { // draw words
-            for (auto &w : words) {
-                if (w.active) {
-                    int col = w.x;
-                    int row = w.y;
-                    int n = w.text.size();
-                    for (size_t i = 0; i < n; i++) {
-                        double pos = static_cast<double>(col+i)/W;
-                        if (col+i >= 0 && col+i < W && row >= 0 && row < H) {
-                            buffer[row][col+i].ch = w.text[i];
-                            if (pos >= 0.8) 
-                                buffer[row][col+i].color = Color::Red | Color::Bold;
-                            else if (pos >= 0.6)
-                                buffer[row][col+i].color = Color::Yellow | Color::Bold;
-                            else {
-                                buffer[row][col+i].color = Color::Green | Color::Bold;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Draw typing field and input
-            std::string typeBox = "[Type: " + inputWord;
-            int pos = 0;
-            for (int i = 0; i < typeBox.size(); i++) {
-                if (pos > W)
-                    break;
-                buffer[H-1][pos++] = { typeBox[i], Color::White | Color::BgBlue };
-            }
-            buffer[H-1][25] = { ']', Color::White | Color::BgBlue };
+            renderer.drawWords(words);
+            renderer.drawTypeBox(inputWord);
 
             // Draw timer
             int sec = remainingSeconds();
             if (sec == 0) {
-                finalScreen = true;
+                gameState = State::FINAL;
                 return;
             }
-            int minutes = sec/60;
-            int seconds = sec%60;
-
-            std::string timerText = std::to_string(minutes) + ":" + (seconds < 10 ? "0" : "") + std::to_string(seconds);
-            int x = W - 8; // adjust for MM:SS width
-            int y = H - 1; // bottom row
-
-            Color timerColor = Color::White | Color::BgBlue;
-            if (sec <= 10) {
-                // blink effect
-                if ((sec * 2) % 2 == 0) // toggle every 0.5s
-                    timerColor = Color::Red | Color::BgBlue | Color::Bold; // | Color::Blink;
-            }
-
-            for (int i = 0; i < timerText.size(); i++) {
-                if (x+i >= 0 && x+i < W)
-                    buffer[y][x+i] = { timerText[i], timerColor };
-            }
+            renderer.drawTimer(sec);
         }
+        else if (gameState == State::FINAL) 
+            renderer.drawFinalScreen(hitWords);
 
-
-
-        // Acutal draw
-        Color last = Color::Reset;
-        std::cout << "\033[H";
-        for (int y = 0; y < H; y++) {
-            for (int x = 0; x < W; x++) {
-                const Color& cur = buffer[y][x].color;
-                 if (cur.mask != last.mask) {
-                     std::cout << "\033[0m";
-                     std::cout << cur;
-                     last = cur;
-                 }
-                 std::cout << buffer[y][x].ch;
-            }
-            std::cout.write("\n", 1);
-        }
-        std::cout.flush();
+        renderer.draw();
     }
 
+    //--------------
+    TermRenderer renderer{};
+    Input        input{};
+    State        gameState{State::WELCOME};
 
-    void setRaw()
-    {
-        struct termios raw;
-        tcgetattr(STDIN_FILENO, &orig_term);
+    Star              stars[MAXSTARS];
+    std::vector<Word> words{};
+    //--------------
 
-        raw = orig_term;
-        raw.c_lflag &= ~(ICANON | ECHO);
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-
-        fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
-    }
-
-    void processInput()
-    {
-        ch = read();
-        if (ch == -1) return;
-        if (welcomeScreen) {
-            if (ch == 'q')
-                shouldClose = true;
-            else if (ch == ' ') {
-                welcomeScreen = false;
-                inputWord.clear();
-                startTime = clock::now();
-            }
-            return;
-        }
-        if (ch == '\033')
-            shouldClose = true;
-        else if (ch == 127 && !inputWord.empty())
-                inputWord.pop_back();
-        else if (ch == ' ')
-            checkWords();
-        else if (::isprint(ch))
-            inputWord += ch;
-    }
-
-    int read()
-    {
-        int n = ::read(STDIN_FILENO, &ch, 1);
-        if (n == 1) return ch;
-        return -1;
-    }
-
-    bool ShouldClose() const
-    {
-        return !shouldClose;
-    }
-
-    void checkWords()
-    {
-        for (Word &w : words) {
-            if (w.active && w.text == inputWord) {
-                w.active = false;
-                hitWords++;
-                rowCount[w.y]--;
-            }
-        }
-        inputWord.clear();
-    }
-
+    bool shouldClose = false;
 
     // Real elapsed time
     using clock = std::chrono::steady_clock;
@@ -424,40 +501,26 @@ struct Term {
     Seconds waveIntervals = 7.0f; // second between waves
     Seconds spawnInterval = 0.5f; // second per word (steady rate)
 
-
     // Timer
     clock::time_point startTime;
     const int TOTAL_TIME = 60;
 
-    char ch;
     int hitWords{0};
     std::string inputWord{};
-    std::vector<Word> words{};
-    Star stars[MAXSTARS];
-    //using Screen = std::array<std::array<Cell, W>, H>;
-    //Screen buffer;
-    Cell buffer[H][W];
-
-    bool finalScreen = false;
-    bool welcomeScreen = true;
-    bool shouldClose = false;
-
-    struct termios orig_term;
 };
 
 int main(void)
 {
-    Term term{};
+    Game game{};
 
-    while (term.ShouldClose()) {
+    while (game.close()) {
 
-        term.clearBuffer();
-        term.processInput();
-        term.update();
-        term.drawBuffer();
+        game.clearBuffer();
+        game.processInput();
+        game.update();
+        game.drawBuffer();
 
         ::usleep(30'000);
-
     }
 
     return 0;
