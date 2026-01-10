@@ -532,7 +532,7 @@ struct Game {
             if (waveElapsed >= waveIntervals) {
                 lastWaveTime = now;
                 wordSystem.allowedCount = std::min(
-                        wordSystem.allowedCount + waveIncrement,
+                        wordSystem.allowedCount + wordSystem.waveIncrement,
                         (int)wordSystem.words.size());
 
                 // optional difficulty ramp
@@ -596,7 +596,6 @@ struct Game {
     clock::time_point lastSpawnTime = clock::now();
     clock::time_point lastWaveTime  = clock::now();
 
-    int waveIncrement = 5;
     Seconds waveIntervals = 7.0f; // second between waves
     Seconds spawnInterval = 0.5f; // second per word (steady rate)
 
