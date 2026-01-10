@@ -339,7 +339,7 @@ struct Game {
         inputWord.clear();
     }
 
-    bool close() const
+    bool running() const
     {
         return !shouldClose;
     }
@@ -503,7 +503,7 @@ struct Game {
 
     // Timer
     clock::time_point startTime;
-    const int TOTAL_TIME = 60;
+    static constexpr int TOTAL_TIME = 60;
 
     int hitWords{0};
     std::string inputWord{};
@@ -513,7 +513,7 @@ int main(void)
 {
     Game game{};
 
-    while (game.close()) {
+    while (game.running()) {
 
         game.clearBuffer();
         game.processInput();
