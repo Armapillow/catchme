@@ -32,7 +32,6 @@ const char* LOGO[] = {
 };
 
 const int MAX_PER_ROW = 1;  // or 2
-std::vector<int> rowCount(H, 0);
 
 enum class State {
     WELCOME,
@@ -69,6 +68,77 @@ std::ostream &operator<< (std::ostream &os, const Word &w)
        << w.active;
     return os;
 }
+
+struct WordSystem {
+    WordSystem()
+    {
+        rowCount = std::vector<int>(H, 0);
+    }
+
+    std::vector<Word> words{};
+    std::vector<int> rowCount;
+
+    int spawnedCount = 0;
+    int allowedCount = 10; // size of the first wave
+    int waveIncrement = 5;
+
+    void trySpawn()
+    {
+        int row = rand() % (H-2) + 1;
+        if (rowCount[row] >= MAX_PER_ROW)
+            return; // skip this spawn
+
+        Word &w = words[spawnedCount];
+        //w.x = -static_cast<int>(w.text.length()) - 5;
+        w.x = rand() % 2 ? -1 : -static_cast<int>(w.text.length())/2;
+        w.y = row;
+        w.active = true;
+        // w.tick = 0;
+        rowCount[row]++;
+
+        spawnedCount++;
+    }
+
+    void reset()
+    {
+        spawnedCount = 0;
+        allowedCount = 10; // size of the first wave
+        std::fill(rowCount.begin(), rowCount.end(), 0);
+        //words.clear();
+        // load words
+        for (auto &w : words)
+            w.active = false;
+
+    }
+
+    void checkInput(std::string &inputWord, int &hitWords)
+    {
+        for (Word &w : words) {
+            if (w.active && w.text == inputWord) {
+                w.active = false;
+                hitWords++;
+                rowCount[w.y]--;
+            }
+        }
+        inputWord.clear();
+    }
+
+    void updateWords()
+    {
+        for (auto &w : words) {
+            if (!w.active) continue;
+            if (++w.tick >= w.speed) {
+                w.tick = 0;
+                w.x++;
+                if (w.x >= W) {
+                    //w.x = -static_cast<int>(w.text.size());
+                    w.active = false;
+                    rowCount[w.y]--;
+                }
+            }
+        }
+    }
+};
 
 // Terminal renderer
 struct TermRenderer {
@@ -282,7 +352,7 @@ struct Game {
 
         if (in.good()) {
             while (getline(in, line))
-                words.push_back({ std::move(line),
+                wordSystem.words.push_back({ std::move(line),
                         /*x=*/0,
                         /*y=*/rand()%(H-2)+1,
                         /*speed=*/10/*+(rand()%8)*/,
@@ -294,7 +364,7 @@ struct Game {
 
         std::random_device rd;
         std::mt19937 rng(rd());
-        std::shuffle(words.begin(), words.end(), rng);
+        std::shuffle(wordSystem.words.begin(), wordSystem.words.end(), rng);
 
         /*
         // TODO: this case
@@ -329,18 +399,6 @@ struct Game {
         return remaining > 0 ? remaining : 0;
     }
 
-    void checkWords()
-    {
-        for (Word &w : words) {
-            if (w.active && w.text == inputWord) {
-                w.active = false;
-                hitWords++;
-                rowCount[w.y]--;
-            }
-        }
-        inputWord.clear();
-    }
-
     bool running() const
     {
         return !shouldClose;
@@ -354,17 +412,10 @@ struct Game {
     void resetGame(void)
     {
         pausedTotal = 0;
-        spawnedCount = 0;
-        allowedCount = 10; // size of the first wave
         hitWords = 0;
 
         inputWord.clear();
-        std::fill(rowCount.begin(), rowCount.end(), 0);
-
-        //words.clear();
-        // load words
-        for (auto &w : words)
-            w.active = false;
+        wordSystem.reset();
 
         startTime = clock::now();
         lastSpawnTime = clock::now();
@@ -410,7 +461,7 @@ struct Game {
         else if (ch == 127 && !inputWord.empty())
                 inputWord.pop_back();
         else if (ch == ' ')
-            checkWords();
+            wordSystem.checkInput(inputWord, hitWords);
         else if (::isprint(ch))
             inputWord += ch;
     }
@@ -440,9 +491,9 @@ struct Game {
 
             if (waveElapsed >= waveIntervals) {
                 lastWaveTime = now;
-                allowedCount = std::min(
-                        allowedCount + waveIncrement,
-                        (int)words.size());
+                wordSystem.allowedCount = std::min(
+                        wordSystem.allowedCount + waveIncrement,
+                        (int)wordSystem.words.size());
 
                 // optional difficulty ramp
                 spawnInterval = std::max(0.1f, spawnInterval * 0.95f);
@@ -452,38 +503,16 @@ struct Game {
                 std::chrono::duration<float>(now - lastSpawnTime).count();
 
             // steady spawn logic
-            if (spawnElapsed >= spawnInterval && spawnedCount < allowedCount &&
-                    spawnedCount < words.size())
+            if (spawnElapsed >= spawnInterval && wordSystem.spawnedCount < wordSystem.allowedCount &&
+                    wordSystem.spawnedCount < wordSystem.words.size())
             {
                 lastSpawnTime = now;
 
-                int row = rand() % (H-2) + 1;
-                if (rowCount[row] >= MAX_PER_ROW)
-                    return; // skip this spawn
-
-                Word& w = words[spawnedCount];
-                //w.x = -static_cast<int>(w.text.length()) - 5;
-                w.x = rand() % 2 ? -1 : -static_cast<int>(w.text.length())/2;
-                w.y = row;
-                w.active = true;
-                rowCount[row]++;
-
-                spawnedCount++;
+                wordSystem.trySpawn();
             }
 
             // update words
-            for (auto &w : words) {
-                if (!w.active) continue;
-                if (++w.tick >= w.speed) {
-                    w.tick = 0;
-                    w.x++;
-                    if (w.x >= W) {
-                        //w.x = -static_cast<int>(w.text.size());
-                        w.active = false;
-                        rowCount[w.y]--;
-                    }
-                }
-            }
+            wordSystem.updateWords();
         }
     }
 
@@ -496,7 +525,7 @@ struct Game {
             renderer.drawWelcomeScreen();
         else if (gameState == State::PLAY) {
 
-            renderer.drawWords(words);
+            renderer.drawWords(wordSystem.words);
             renderer.drawTypeBox(inputWord);
 
             // Draw timer
@@ -517,11 +546,11 @@ struct Game {
 
     //--------------
     TermRenderer renderer{};
+    WordSystem   wordSystem{};
     Input        input{};
     State        gameState{State::WELCOME};
 
     Star              stars[MAXSTARS];
-    std::vector<Word> words{};
     //--------------
 
     bool shouldClose = false;
@@ -534,8 +563,6 @@ struct Game {
     clock::time_point pauseStart{};
     Seconds pausedTotal{0};
 
-    int spawnedCount = 0;
-    int allowedCount = 10; // size of the first wave
     int waveIncrement = 5;
     Seconds waveIntervals = 7.0f; // second between waves
     Seconds spawnInterval = 0.5f; // second per word (steady rate)
