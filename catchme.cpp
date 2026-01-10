@@ -37,6 +37,7 @@ std::vector<int> rowCount(H, 0);
 enum class State {
     WELCOME,
     PLAY,
+    PAUSE,
     FINAL,
 };
 
@@ -320,7 +321,8 @@ struct Game {
     {
         auto now = clock::now();
         int elapsed = static_cast<int>(
-                std::chrono::duration_cast<std::chrono::seconds>(now - startTime).count()
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    now - startTime).count() - pausedTotal
                 );
 
         int remaining = TOTAL_TIME - elapsed;
@@ -349,6 +351,28 @@ struct Game {
         renderer.clearBuffer();
     }
 
+    void resetGame(void)
+    {
+        pausedTotal = 0;
+        spawnedCount = 0;
+        allowedCount = 10; // size of the first wave
+        hitWords = 0;
+
+        inputWord.clear();
+        std::fill(rowCount.begin(), rowCount.end(), 0);
+
+        //words.clear();
+        // load words
+        for (auto &w : words)
+            w.active = false;
+
+        startTime = clock::now();
+        lastSpawnTime = clock::now();
+        lastWaveTime = clock::now();
+
+        gameState = State::PLAY;
+    }
+
     void processInput(void)
     {
         char ch = input.readKey();
@@ -364,18 +388,24 @@ struct Game {
             }
             return;
         } else if (gameState == State::FINAL) {
-            /*
             if (ch == 'r') {
-                gameState = State::PLAY;
-                inputWord.clear();
-                startTime = clock::now();
-                hitWords = 0;
-                //words.clear();
-                // load words
+                resetGame();
+                return;
             }
-            */
+        } else if (gameState == State::PLAY && ch == '\033') {
+            pauseStart = clock::now();
+            gameState = State::PAUSE;
+            return;
         }
-        if (ch == '\033')
+        if (gameState == State::PAUSE) {
+            if (ch == 'p') {
+                pausedTotal += static_cast<int>(std::chrono::duration<float>(clock::now() -
+                                   pauseStart).count());
+                gameState = State::PLAY;
+            } else if (ch == 'r') resetGame();
+            else if (ch == 'q') shouldClose = true;
+            return;
+        } else if (gameState == State::FINAL && ch == '\033')
             shouldClose = true;
         else if (ch == 127 && !inputWord.empty())
                 inputWord.pop_back();
@@ -400,6 +430,9 @@ struct Game {
                 }
             }
         }
+
+        if (gameState != State::PLAY)
+            return;
 
         if (gameState == State::PLAY) {
             auto now = clock::now();
@@ -474,6 +507,8 @@ struct Game {
             }
             renderer.drawTimer(sec);
         }
+        else if (gameState == State::PAUSE)
+            renderer.drawText(H/2, W/2-6, "PAUSED", Color::White | Color::Bold);
         else if (gameState == State::FINAL) 
             renderer.drawFinalScreen(hitWords);
 
@@ -495,6 +530,10 @@ struct Game {
     using clock = std::chrono::steady_clock;
     clock::time_point lastSpawnTime = clock::now();
     clock::time_point lastWaveTime  = clock::now();
+
+    clock::time_point pauseStart{};
+    Seconds pausedTotal{0};
+
     int spawnedCount = 0;
     int allowedCount = 10; // size of the first wave
     int waveIncrement = 5;
