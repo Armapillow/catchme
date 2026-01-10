@@ -140,6 +140,60 @@ struct WordSystem {
     }
 };
 
+struct Timer {
+    static constexpr int TOTAL_TIME = 60;
+
+    using clock = std::chrono::steady_clock;
+    clock::time_point startTime;
+    clock::time_point pauseStart{};
+
+    Seconds pausedTotal{0};
+    bool isPaused{false};
+
+    void start()
+    {
+        startTime = clock::now();
+        isPaused = false;
+        pausedTotal = 0;
+    }
+
+    void pause()
+    {
+        if (!isPaused) {
+            pauseStart = clock::now();
+            isPaused = true;
+        }
+    }
+
+    void resume()
+    {
+        if (isPaused) {
+            pausedTotal += static_cast<int>(std::chrono::duration<float>(clock::now() -
+                        pauseStart).count());
+            isPaused = false;
+        }
+    }
+
+    int remainingSeconds() const
+    {
+        auto now = clock::now();
+        int elapsed = static_cast<int>(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    now - startTime).count() - pausedTotal
+                );
+
+        int remaining = TOTAL_TIME - elapsed;
+        return remaining > 0 ? remaining : 0;
+    }
+
+    void reset()
+    {
+        pausedTotal = 0;
+        startTime = clock::now();
+    }
+
+};
+
 // Terminal renderer
 struct TermRenderer {
     TermRenderer(bool raw = true)
@@ -386,19 +440,6 @@ struct Game {
 
     }
 
-    inline
-    int remainingSeconds() const
-    {
-        auto now = clock::now();
-        int elapsed = static_cast<int>(
-                std::chrono::duration_cast<std::chrono::seconds>(
-                    now - startTime).count() - pausedTotal
-                );
-
-        int remaining = TOTAL_TIME - elapsed;
-        return remaining > 0 ? remaining : 0;
-    }
-
     bool running() const
     {
         return !shouldClose;
@@ -411,13 +452,13 @@ struct Game {
 
     void resetGame(void)
     {
-        pausedTotal = 0;
+        timer.reset();
+
         hitWords = 0;
 
         inputWord.clear();
         wordSystem.reset();
 
-        startTime = clock::now();
         lastSpawnTime = clock::now();
         lastWaveTime = clock::now();
 
@@ -435,7 +476,7 @@ struct Game {
             else if (ch == ' ') {
                 gameState = State::PLAY;
                 //inputWord.clear();
-                startTime = clock::now();
+                timer.start();
             }
             return;
         } else if (gameState == State::FINAL) {
@@ -444,14 +485,13 @@ struct Game {
                 return;
             }
         } else if (gameState == State::PLAY && ch == '\033') {
-            pauseStart = clock::now();
+            timer.pause();
             gameState = State::PAUSE;
             return;
         }
         if (gameState == State::PAUSE) {
             if (ch == 'p') {
-                pausedTotal += static_cast<int>(std::chrono::duration<float>(clock::now() -
-                                   pauseStart).count());
+                timer.resume();
                 gameState = State::PLAY;
             } else if (ch == 'r') resetGame();
             else if (ch == 'q') shouldClose = true;
@@ -513,6 +553,9 @@ struct Game {
 
             // update words
             wordSystem.updateWords();
+
+            if (timer.remainingSeconds() <= 0)
+                gameState = State::FINAL;
         }
     }
 
@@ -527,14 +570,7 @@ struct Game {
 
             renderer.drawWords(wordSystem.words);
             renderer.drawTypeBox(inputWord);
-
-            // Draw timer
-            int sec = remainingSeconds();
-            if (sec == 0) {
-                gameState = State::FINAL;
-                return;
-            }
-            renderer.drawTimer(sec);
+            renderer.drawTimer(timer.remainingSeconds());
         }
         else if (gameState == State::PAUSE)
             renderer.drawText(H/2, W/2-6, "PAUSED", Color::White | Color::Bold);
@@ -548,6 +584,7 @@ struct Game {
     TermRenderer renderer{};
     WordSystem   wordSystem{};
     Input        input{};
+    Timer        timer{};
     State        gameState{State::WELCOME};
 
     Star              stars[MAXSTARS];
@@ -555,21 +592,13 @@ struct Game {
 
     bool shouldClose = false;
 
-    // Real elapsed time
     using clock = std::chrono::steady_clock;
     clock::time_point lastSpawnTime = clock::now();
     clock::time_point lastWaveTime  = clock::now();
 
-    clock::time_point pauseStart{};
-    Seconds pausedTotal{0};
-
     int waveIncrement = 5;
     Seconds waveIntervals = 7.0f; // second between waves
     Seconds spawnInterval = 0.5f; // second per word (steady rate)
-
-    // Timer
-    clock::time_point startTime;
-    static constexpr int TOTAL_TIME = 60;
 
     int hitWords{0};
     std::string inputWord{};
