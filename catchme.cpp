@@ -31,7 +31,7 @@ const char* LOGO[] = {
     R"(/_/ \____/_/   \_\_| \____|_| |_|_|  |_|_____\_\)"
 };
 
-const int MAX_PER_ROW = 1;  // or 2
+const int MAX_PER_ROW = 3;  // or 2
 
 enum class State {
     WELCOME,
@@ -82,21 +82,48 @@ struct WordSystem {
     int allowedCount = 10; // size of the first wave
     int waveIncrement = 5;
 
+    bool fitsInRow(int row, int newX, int width)
+    {
+        for (const auto &w : words) {
+            if (!w.active || w.y != row)
+                continue;
+
+            int wStart = w.x;
+            int wEnd   = w.x + static_cast<int>(w.text.size());
+
+            int nStart = newX;
+            int nEnd   = newX+width;
+
+            if (!(nEnd <= wStart || nStart >= wEnd))
+                return false; // overlap
+        }
+
+        return true;
+    }
+
     void trySpawn()
     {
-        int row = rand() % (H-2) + 1;
-        if (rowCount[row] >= MAX_PER_ROW)
-            return; // skip this spawn
+        for (int attempt = 0; attempt < 5; attempt++) {
+            int row = rand() % (H-2) + 1;
+            if (rowCount[row] >= MAX_PER_ROW)
+                continue; // skip this spawn
 
-        Word &w = words[spawnedCount];
-        //w.x = -static_cast<int>(w.text.length()) - 5;
-        w.x = rand() % 2 ? -1 : -static_cast<int>(w.text.length())/2;
-        w.y = row;
-        w.active = true;
-        // w.tick = 0;
-        rowCount[row]++;
+            Word &w = words[spawnedCount];
+            //w.x = -static_cast<int>(w.text.length()) - 5;
+            int x = rand() % 2 ? -1 : -static_cast<int>(w.text.length())/2;
+            int width = w.text.size();
 
-        spawnedCount++;
+            if (!fitsInRow(row, x, width))
+                continue;
+
+            w.x = x;
+            w.y = row;
+            w.active = true;
+            // w.tick = 0;
+            rowCount[row]++;
+
+            spawnedCount++;
+        }
     }
 
     void reset()
