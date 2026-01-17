@@ -31,7 +31,7 @@ const char* LOGO[] = {
     R"(/_/ \____/_/   \_\_| \____|_| |_|_|  |_|_____\_\)"
 };
 
-const int MAX_PER_ROW = 3;  // or 2
+const int WORD_GAP = 10;
 
 enum class State {
     WELCOME,
@@ -70,13 +70,9 @@ std::ostream &operator<< (std::ostream &os, const Word &w)
 }
 
 struct WordSystem {
-    WordSystem()
-    {
-        rowCount = std::vector<int>(H, 0);
-    }
 
     std::vector<Word> words{};
-    std::vector<int> rowCount;
+    unsigned score = 0;
 
     int spawnedCount = 0;
     int allowedCount = 10; // size of the first wave
@@ -92,7 +88,7 @@ struct WordSystem {
             int wEnd   = w.x + static_cast<int>(w.text.size());
 
             int nStart = newX;
-            int nEnd   = newX+width;
+            int nEnd   = newX+width+WORD_GAP;
 
             if (!(nEnd <= wStart || nStart >= wEnd))
                 return false; // overlap
@@ -103,34 +99,28 @@ struct WordSystem {
 
     void trySpawn()
     {
-        for (int attempt = 0; attempt < 5; attempt++) {
-            int row = rand() % (H-2) + 1;
-            if (rowCount[row] >= MAX_PER_ROW)
-                continue; // skip this spawn
+        int row = rand() % (H-2) + 1;
 
-            Word &w = words[spawnedCount];
-            //w.x = -static_cast<int>(w.text.length()) - 5;
-            int x = rand() % 2 ? -1 : -static_cast<int>(w.text.length())/2;
-            int width = w.text.size();
+        Word &w = words[spawnedCount];
+        int x = -static_cast<int>(w.text.length());
+        int width = w.text.size();
 
-            if (!fitsInRow(row, x, width))
-                continue;
+        if (!fitsInRow(row, x, width))
+            return;
 
-            w.x = x;
-            w.y = row;
-            w.active = true;
-            // w.tick = 0;
-            rowCount[row]++;
+        w.x = x;
+        w.y = row;
+        w.active = true;
+        // w.tick = 0;
 
-            spawnedCount++;
-        }
+        spawnedCount++;
     }
 
     void reset()
     {
         spawnedCount = 0;
         allowedCount = 10; // size of the first wave
-        std::fill(rowCount.begin(), rowCount.end(), 0);
+        score = 0;
         //words.clear();
         // load words
         for (auto &w : words)
@@ -144,7 +134,7 @@ struct WordSystem {
             if (w.active && w.text == inputWord) {
                 w.active = false;
                 hitWords++;
-                rowCount[w.y]--;
+                score += w.text.size() * 10;
             }
         }
         inputWord.clear();
@@ -160,7 +150,6 @@ struct WordSystem {
                 if (w.x >= W) {
                     //w.x = -static_cast<int>(w.text.size());
                     w.active = false;
-                    rowCount[w.y]--;
                 }
             }
         }
@@ -348,10 +337,12 @@ struct TermRenderer {
         buffer[H-1][25] = { ']', Color::White | Color::BgBlue };
     }
 
-    void drawFinalScreen(const int &hitWords)
+    void drawFinalScreen(const int &hitWords, const unsigned score)
     {
         std::string resultText = "Your result is " + std::to_string(hitWords) + "w/m";
+        std::string scoreText  = "with score: " + std::to_string(score);
         drawText(H/2-2, W/2 - resultText.size()/2, resultText.c_str(), Color::White | Color::Bold);
+        drawText(H/2-1, W/2 - scoreText.size()/2, scoreText.c_str(), Color::White | Color::Bold);
     }
 
     void drawTimer(const int &sec)
@@ -375,6 +366,18 @@ struct TermRenderer {
             if (x+i >= 0 && x+i < W)
                 buffer[y][x+i] = { timerText[i], timerColor };
         }
+    }
+
+    void drawScore(unsigned score)
+    {
+        int y = H - 1; // bottom row
+        int x = W-22;
+        std::string scoreText = "Score: " + std::to_string(score);
+        for (int i = 0; i < scoreText.size(); i++) {
+            if (x+i >= 0 && x+i < W)
+                buffer[y][x+i] = { scoreText[i], Color::White | Color::Bold | Color::BgBlue };
+        }
+
     }
 
     void draw(void)
@@ -598,11 +601,12 @@ struct Game {
             renderer.drawWords(wordSystem.words);
             renderer.drawTypeBox(inputWord);
             renderer.drawTimer(timer.remainingSeconds());
+            renderer.drawScore(wordSystem.score);
         }
         else if (gameState == State::PAUSE)
             renderer.drawText(H/2, W/2-6, "PAUSED", Color::White | Color::Bold);
         else if (gameState == State::FINAL) 
-            renderer.drawFinalScreen(hitWords);
+            renderer.drawFinalScreen(hitWords, wordSystem.score);
 
         renderer.draw();
     }
@@ -623,7 +627,7 @@ struct Game {
     clock::time_point lastSpawnTime = clock::now();
     clock::time_point lastWaveTime  = clock::now();
 
-    Seconds waveIntervals = 7.0f; // second between waves
+    Seconds waveIntervals = 5.0f; // second between waves
     Seconds spawnInterval = 0.5f; // second per word (steady rate)
 
     int hitWords{0};
