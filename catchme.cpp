@@ -500,40 +500,45 @@ struct Game {
         char ch = input.readKey();
         if (ch == -1) return;
 
-        if (gameState == State::WELCOME) {
-            if (ch == 'q')
-                shouldClose = true;
-            else if (ch == ' ') {
-                gameState = State::PLAY;
-                //inputWord.clear();
-                timer.start();
-            }
-            return;
-        } else if (gameState == State::FINAL) {
-            if (ch == 'r') {
-                resetGame();
-                return;
-            }
-        } else if (gameState == State::PLAY && ch == '\033') {
-            timer.pause();
-            gameState = State::PAUSE;
-            return;
+        switch (gameState) {
+            case State::WELCOME: {
+                if (ch == 'q')
+                    shouldClose = true;
+                else if (ch == ' ') {
+                    gameState = State::PLAY;
+                    inputWord.clear();
+                    timer.start();
+                }
+            } break;
+
+            case State::PLAY: {
+                if (ch == '\033') {
+                    timer.pause();
+                    gameState = State::PAUSE;
+                }
+                else if (ch == 127 && !inputWord.empty())
+                    inputWord.pop_back();
+                else if (ch == ' ')
+                    wordSystem.checkInput(inputWord, hitWords);
+                else if (::isprint(ch))
+                    inputWord += ch;
+            } break;
+
+            case State::PAUSE: {
+                if (ch == 'p') {
+                    timer.resume();
+                    gameState = State::PLAY;
+                } else if (ch == 'r') resetGame();
+                else if (ch == 'q') shouldClose = true;
+            } break;
+
+            case State::FINAL: {
+                if (ch == 'r')
+                    resetGame();
+                else if (ch == '\033')
+                    shouldClose = true;
+            } break;
         }
-        if (gameState == State::PAUSE) {
-            if (ch == 'p') {
-                timer.resume();
-                gameState = State::PLAY;
-            } else if (ch == 'r') resetGame();
-            else if (ch == 'q') shouldClose = true;
-            return;
-        } else if (gameState == State::FINAL && ch == '\033')
-            shouldClose = true;
-        else if (ch == 127 && !inputWord.empty())
-                inputWord.pop_back();
-        else if (ch == ' ')
-            wordSystem.checkInput(inputWord, hitWords);
-        else if (::isprint(ch))
-            inputWord += ch;
     }
 
     void update(void)
