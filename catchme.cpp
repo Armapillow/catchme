@@ -40,6 +40,31 @@ enum class State {
     FINAL,
 };
 
+enum class Command {
+    None,
+    Up,
+    Down,
+    Select,
+    Quit
+};
+
+struct MenuItem {
+    std::string label;
+    std::string filePath;
+};
+
+struct Menu {
+    std::vector<MenuItem> options;
+    int selected = 0;
+};
+
+Menu menu{
+    {
+        { "English (easy)", "english.txt" },
+        { "English (hard)", "english_hard.txt" },
+    }
+};
+
 struct Star {
     int x, y;
     Frames speed;
@@ -312,16 +337,17 @@ struct TermRenderer {
         }
     }
 
-    void drawWelcomeScreen(void)
+    void drawMenu(void)
     {
         int pos = 5,
             n   = sizeof(LOGO)/sizeof(LOGO[0]);
         for (int i = 0; i < n; i++)
             drawText(pos+i, 16, LOGO[i], Color::White | Color::Bold);
-        drawText(pos+n, 29, "<Press SPACE to start>", Color::Bold/*Color::Underline*/);
-        drawText(pos+n+1, 36, "Option 1", Color::White);
-        drawText(pos+n+2, 36, "Option 2", Color::White);
-        drawText(pos+n+3, 36, "Option 3", Color::White);
+        int y = H/2;
+        for (int i = 0; i < menu.options.size(); i++) {
+            Color c = (i == menu.selected) ? Color::BgWhite | Color::Black : Color::White;
+            drawText(y+i, W/2-10, menu.options[i].label.c_str(), c);
+        }
     }
 
     void drawTypeBox(const std::string &inputWord)
@@ -405,6 +431,16 @@ struct TermRenderer {
 
 struct Input {
 
+    Command mapMenuKey(char ch)
+    {
+        if (ch == 'j') return Command::Down;
+        if (ch == 'k') return Command::Up;
+        if (ch == '\n') return Command::Select;
+        if (ch == 'q') return Command::Quit;
+
+        return Command::None;
+    }
+
     int readKey(void)
     {
         int n = ::read(STDIN_FILENO, &ch, 1);
@@ -429,9 +465,11 @@ struct Game {
             stars[i].tick = 0;
         }
 
-        // TODO: function loadWords(filepath)
-        const std::string filePath = "english.txt";
-        std::ifstream in(filePath);
+    }
+
+    void loadWords(const std::string &wordsFile)
+    {
+        std::ifstream in(wordsFile);
         std::string line;
 
         if (in.good()) {
@@ -449,25 +487,6 @@ struct Game {
         std::random_device rd;
         std::mt19937 rng(rd());
         std::shuffle(wordSystem.words.begin(), wordSystem.words.end(), rng);
-
-        /*
-        // TODO: this case
-        // aircraft -> 8
-        // 01234567
-        //    air   -> 3
-        const int gap = 10;
-        int wordsSize = words.size();
-        for (int i = 0; i < wordsSize; i++) {
-            int nextX = -static_cast<int>(words[i].text.length()) - gap;
-            for (int j = 0; j < wordsSize; j++) {
-                if (i == j) continue;
-                if (words[i].y == words[j].y) {
-                    words[j].x = nextX;
-                    nextX -= words[j].text.length() + gap;
-                }
-            }
-        }*/
-
     }
 
     bool running() const
@@ -495,6 +514,24 @@ struct Game {
         gameState = State::PLAY;
     }
 
+    void updateMenu(const Command &cmd)
+    {
+        if (cmd == Command::Down)
+            menu.selected = (menu.selected + 1) % menu.options.size();
+        if (cmd == Command::Up)
+            menu.selected = (menu.selected + menu.options.size() - 1) %
+                menu.options.size();
+        else if (cmd == Command::Select) {
+            std::string selectedFile = menu.options[menu.selected].filePath;
+
+            loadWords("./english.txt");
+            inputWord.clear();
+            gameState = State::PLAY;
+            timer.start();
+        }
+        else if (cmd == Command::Quit) shouldClose = true;
+    }
+
     void processInput(void)
     {
         char ch = input.readKey();
@@ -502,13 +539,7 @@ struct Game {
 
         switch (gameState) {
             case State::WELCOME: {
-                if (ch == 'q')
-                    shouldClose = true;
-                else if (ch == ' ') {
-                    gameState = State::PLAY;
-                    inputWord.clear();
-                    timer.start();
-                }
+                updateMenu(input.mapMenuKey(ch));
             } break;
 
             case State::PLAY: {
@@ -600,7 +631,7 @@ struct Game {
         renderer.drawStars(stars);
 
         if (gameState == State::WELCOME)
-            renderer.drawWelcomeScreen();
+            renderer.drawMenu();
         else if (gameState == State::PLAY) {
 
             renderer.drawWords(wordSystem.words);
