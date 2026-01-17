@@ -80,6 +80,9 @@ struct WordSystem {
 
     bool fitsInRow(int row, int newX, int width)
     {
+        int nStart = newX-WORD_GAP;
+        int nEnd   = newX+width+WORD_GAP;
+
         for (const auto &w : words) {
             if (!w.active || w.y != row)
                 continue;
@@ -87,10 +90,7 @@ struct WordSystem {
             int wStart = w.x;
             int wEnd   = w.x + static_cast<int>(w.text.size());
 
-            int nStart = newX;
-            int nEnd   = newX+width+WORD_GAP;
-
-            if (!(nEnd <= wStart || nStart >= wEnd))
+            if (nEnd > wStart && nStart < wEnd)
                 return false; // overlap
         }
 
