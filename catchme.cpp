@@ -60,8 +60,8 @@ struct Menu {
 
 Menu menu{
     {
-        { "English (easy)", "english.txt" },
-        { "English (hard)", "english_hard.txt" },
+        { "English (easy, 999)", "dicts/english-simple.txt" },
+        { "English (hard, 973)", "dicts/english-hard.txt" },
     }
 };
 
@@ -524,7 +524,7 @@ struct Game {
         else if (cmd == Command::Select) {
             std::string selectedFile = menu.options[menu.selected].filePath;
 
-            loadWords("./english.txt");
+            loadWords(selectedFile);
             inputWord.clear();
             gameState = State::PLAY;
             timer.start();
