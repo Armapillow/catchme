@@ -78,9 +78,9 @@ struct Cell {
 
 struct Word {
     std::string text;
-    int x, y;
-    Frames speed;
-    Frames tick;
+    float x;
+    int  y;
+    float speed;
     bool active;
 
     Word() = default;
@@ -89,8 +89,7 @@ struct Word {
 std::ostream &operator<< (std::ostream &os, const Word &w)
 {
     os << "w: " << w.text << " (" << w.x << "," << w.y
-       << ") " << "speed: " << w.speed << ", " << w.tick
-       << w.active;
+       << ") " << "speed: " << w.speed << ", " << w.active;
     return os;
 }
 
@@ -102,6 +101,9 @@ struct WordSystem {
     int spawnedCount = 0;
     int allowedCount = 10; // size of the first wave
     int waveIncrement = 5;
+
+    float spawnAccumulator = 0.f; // time accumulated since last spawn
+    float spawnInterval = 0.5f;   // seconds per spawn
 
     bool fitsInRow(int row, int newX, int width)
     {
@@ -141,11 +143,22 @@ struct WordSystem {
         spawnedCount++;
     }
 
+    void updateSpawning(float dt)
+    {
+        spawnAccumulator += dt;
+
+        while (spawnAccumulator >= spawnInterval) {
+            spawnAccumulator -= spawnInterval;
+            trySpawn();
+        }
+    }
+
     void reset()
     {
         spawnedCount = 0;
         allowedCount = 10; // size of the first wave
         score = 0;
+        spawnAccumulator = 0.f;
         //words.clear();
         // load words
         for (auto &w : words)
@@ -165,19 +178,27 @@ struct WordSystem {
         inputWord.clear();
     }
 
-    void updateWords()
+    void updateWords(float dt)
     {
         for (auto &w : words) {
             if (!w.active) continue;
-            if (++w.tick >= w.speed) {
-                w.tick = 0;
-                w.x++;
-                if (w.x >= W) {
-                    //w.x = -static_cast<int>(w.text.size());
-                    w.active = false;
-                }
-            }
+            w.x += w.speed * dt;
+            if (w.x >= W)
+                w.active = false;
         }
+    }
+};
+
+struct Clock {
+    using clock = std::chrono::steady_clock;
+    clock::time_point last = clock::now();
+
+    float tick()
+    {
+        auto now = clock::now();
+        std::chrono::duration<float> dt = now - last;
+        last = now;
+        return dt.count(); // seconds
     }
 };
 
@@ -185,17 +206,17 @@ struct Timer {
     static constexpr int TOTAL_TIME = 60;
 
     using clock = std::chrono::steady_clock;
-    clock::time_point startTime;
+    clock::time_point startTime{};
     clock::time_point pauseStart{};
 
-    Seconds pausedTotal{0};
+    std::chrono::duration<float> pausedTotal{0};
     bool isPaused{false};
 
     void start()
     {
         startTime = clock::now();
         isPaused = false;
-        pausedTotal = 0;
+        pausedTotal = std::chrono::duration<float>::zero();
     }
 
     void pause()
@@ -209,27 +230,22 @@ struct Timer {
     void resume()
     {
         if (isPaused) {
-            pausedTotal += static_cast<int>(std::chrono::duration<float>(clock::now() -
-                        pauseStart).count());
+            pausedTotal += clock::now() - pauseStart;
             isPaused = false;
         }
     }
 
-    int remainingSeconds() const
+    float remainingSeconds() const
     {
-        auto now = clock::now();
-        int elapsed = static_cast<int>(
-                std::chrono::duration_cast<std::chrono::seconds>(
-                    now - startTime).count() - pausedTotal
-                );
-
-        int remaining = TOTAL_TIME - elapsed;
+        auto now = isPaused ? pauseStart : clock::now();
+        float elapsed = std::chrono::duration<float>(now - startTime - pausedTotal).count();
+        int remaining = static_cast<int>(TOTAL_TIME - elapsed);
         return remaining > 0 ? remaining : 0;
     }
 
     void reset()
     {
-        pausedTotal = 0;
+        pausedTotal = {};
         startTime = clock::now();
     }
 
@@ -317,7 +333,7 @@ struct TermRenderer {
     {
         for (auto &w : words) {
             if (w.active) {
-                int col = w.x;
+                int col = static_cast<int>(w.x);
                 int row = w.y;
                 int n = w.text.size();
                 for (size_t i = 0; i < n; i++) {
@@ -477,8 +493,8 @@ struct Game {
                 wordSystem.words.push_back({ std::move(line),
                         /*x=*/0,
                         /*y=*/rand()%(H-2)+1,
-                        /*speed=*/10/*+(rand()%8)*/,
-                        /*tick=*/0,
+                        /*speed=*/3,//+static_cast<float>(rand()%3),
+                        /*tick=0,*/
                         /*active=*/false/*true*/
                         });
             in.close();
@@ -501,17 +517,13 @@ struct Game {
 
     void resetGame(void)
     {
-        timer.reset();
-
+        timer.start();
         hitWords = 0;
-
         inputWord.clear();
         wordSystem.reset();
-
-        lastSpawnTime = clock::now();
         lastWaveTime = clock::now();
-
         gameState = State::PLAY;
+        frameClock.last = clock::now();
     }
 
     void updateMenu(const Command &cmd)
@@ -525,9 +537,7 @@ struct Game {
             std::string selectedFile = menu.options[menu.selected].filePath;
 
             loadWords(selectedFile);
-            inputWord.clear();
-            gameState = State::PLAY;
-            timer.start();
+            resetGame();
         }
         else if (cmd == Command::Quit) shouldClose = true;
     }
@@ -574,7 +584,8 @@ struct Game {
 
     void update(void)
     {
-        // update stars
+        float dt = frameClock.tick(); // seconds since last frame
+                                 // update stars
         for (int i=0; i < MAXSTARS; i++) {
             if (++stars[i].tick >= stars[i].speed) {
                 stars[i].tick = 0;
@@ -591,38 +602,24 @@ struct Game {
         if (gameState != State::PLAY)
             return;
 
-        if (gameState == State::PLAY) {
-            auto now = clock::now();
-            float waveElapsed = std::chrono::duration<float>(now - lastWaveTime).count();
+        auto now = clock::now();
+        float waveElapsed = std::chrono::duration<float>(now - lastWaveTime).count();
 
-            if (waveElapsed >= waveIntervals) {
-                lastWaveTime = now;
-                wordSystem.allowedCount = std::min(
-                        wordSystem.allowedCount + wordSystem.waveIncrement,
-                        (int)wordSystem.words.size());
+        if (waveElapsed >= waveIntervals) {
+            lastWaveTime = now;
+            wordSystem.allowedCount = std::min(
+                    wordSystem.allowedCount + wordSystem.waveIncrement,
+                    (int)wordSystem.words.size());
 
-                // optional difficulty ramp
-                spawnInterval = std::max(0.1f, spawnInterval * 0.95f);
-                waveIntervals  = std::max(3.0f, waveIntervals  * 0.98f);
-            }
-            float spawnElapsed =
-                std::chrono::duration<float>(now - lastSpawnTime).count();
-
-            // steady spawn logic
-            if (spawnElapsed >= spawnInterval && wordSystem.spawnedCount < wordSystem.allowedCount &&
-                    wordSystem.spawnedCount < wordSystem.words.size())
-            {
-                lastSpawnTime = now;
-
-                wordSystem.trySpawn();
-            }
-
-            // update words
-            wordSystem.updateWords();
-
-            if (timer.remainingSeconds() <= 0)
-                gameState = State::FINAL;
+            // optional difficulty ramp
+            wordSystem.spawnInterval = std::max(0.1f, wordSystem.spawnInterval * 0.95f);
+            waveIntervals  = std::max(3.0f, waveIntervals  * 0.98f);
         }
+        wordSystem.updateSpawning(dt);
+        wordSystem.updateWords(dt);
+
+        if (timer.remainingSeconds() <= 0)
+            gameState = State::FINAL;
     }
 
     void drawBuffer(void)
@@ -652,6 +649,7 @@ struct Game {
     WordSystem   wordSystem{};
     Input        input{};
     Timer        timer{};
+    Clock        frameClock{};
     State        gameState{State::WELCOME};
 
     Star              stars[MAXSTARS];
@@ -660,11 +658,9 @@ struct Game {
     bool shouldClose = false;
 
     using clock = std::chrono::steady_clock;
-    clock::time_point lastSpawnTime = clock::now();
     clock::time_point lastWaveTime  = clock::now();
 
     Seconds waveIntervals = 5.0f; // second between waves
-    Seconds spawnInterval = 0.5f; // second per word (steady rate)
 
     int hitWords{0};
     std::string inputWord{};
