@@ -524,9 +524,9 @@ struct Game {
         else if (cmd == Command::Select) {
             std::string selectedFile = menu.options[menu.selected].filePath;
 
+            resetGame();
             loadWords(selectedFile);
             inputWord.clear();
-            gameState = State::PLAY;
             timer.start();
         }
         else if (cmd == Command::Quit) shouldClose = true;
@@ -564,8 +564,9 @@ struct Game {
             } break;
 
             case State::FINAL: {
-                if (ch == 'r')
-                    resetGame();
+                if (ch == 'r') {
+                    gameState = State::WELCOME;
+                }
                 else if (ch == '\033')
                     shouldClose = true;
             } break;
