@@ -140,8 +140,8 @@ desire
 despair
 destruction
 detective
-develope
-diblomacy
+develop
+diplomacy
 diesel
 difference
 dimmer
@@ -202,13 +202,13 @@ example
 expect
 export
 expression
-exract
+extract
 eye
 fact
 factor
 fakir
 falcon
-familize
+familiarize
 fantasy
 february
 feeling
@@ -315,7 +315,7 @@ immortalize
 import
 income
 indicator
-ndirect
+indirect
 infiltration
 informize
 injure
@@ -609,7 +609,7 @@ underwear
 underworld
 united
 unlimited
-unpleasent
+unpleasant
 untrained
 unusual
 usenet
@@ -652,7 +652,7 @@ angrily
 anxiously
 apathetically
 appreciatively
-astonishedly
+astonishingly
 audibly
 automatically
 awkwardly
@@ -737,7 +737,7 @@ fiercefully
 firmly
 fitfully
 flatly
-flirtateously
+flirtatiously
 sly
 fondly
 foolishly
@@ -839,7 +839,7 @@ noisily
 noticeably
 officially
 officiously
-omniously
+ominously
 painfully
 passionately
 patiently
@@ -854,7 +854,7 @@ pointedly
 politely
 poorly
 professionally
-profezzionally
+professionally
 profoundly
 protectively
 proudly
@@ -873,7 +873,7 @@ reluctantly
 remotely
 reproachfully
 reverently
-rigoriously
+rigorously
 royally
 rudely
 sadistically
@@ -912,7 +912,7 @@ smugly
 sniffingly
 softly
 solemnly
-sothingly
+soothingly
 sourly
 spontaneously
 sternly
